@@ -144,12 +144,17 @@ export async function searchContext(query: string, topK: number = 5, targetFile?
     const filter = targetFile ? { filePath: targetFile } : undefined;
     
     let results;
-    try {
-      // Try with hybrid search (BM25) first
-      results = await index.queryItems(queryVector, query, topK, filter as any, true);
-    } catch (bm25Error) {
-      // Fallback to simple vector search if index is too small or other hybrid search errors
-      console.warn('Hybrid search failed, falling back to vector-only search:', bm25Error);
+    const allItems = await index.listItems();
+    if (allItems.length >= 3) {
+      try {
+        // Try with hybrid search (BM25) if enough documents exist
+        results = await index.queryItems(queryVector, query, topK, filter as any, true);
+      } catch (bm25Error) {
+        // Fallback to simple vector search if hybrid search fails
+        results = await index.queryItems(queryVector, query, topK, filter as any, false);
+      }
+    } else {
+      // Use simple vector search for small collections
       results = await index.queryItems(queryVector, query, topK, filter as any, false);
     }
     
@@ -226,7 +231,10 @@ export async function getGraphData(): Promise<GraphData> {
     docEmbeddings[filePath] = avg;
   }
 
-  const nodes = filePaths.map(f => ({ id: f, name: path.basename(f), val: fileVectors[f].length }));
+  const nodes = filePaths.map(f => {
+    const relativePath = path.relative(path.join(app.getPath('documents'), 'Omni_Vault'), f);
+    return { id: f, name: relativePath, val: fileVectors[f].length };
+  });
   const links: any[] = [];
 
   for (let i = 0; i < filePaths.length; i++) {

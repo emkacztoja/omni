@@ -109,6 +109,10 @@ ipcMain.handle('ping', () => 'pong');
 ipcMain.handle('save-to-vault', async (event, filename: string, content: string) => {
   try {
     const filePath = path.join(defaultVault, filename);
+    const parentDir = path.dirname(filePath);
+    if (!fs.existsSync(parentDir)) {
+      await fs.promises.mkdir(parentDir, { recursive: true });
+    }
     await fs.promises.writeFile(filePath, content, 'utf-8');
     return { success: true, filePath };
   } catch (err: any) {
@@ -118,15 +122,29 @@ ipcMain.handle('save-to-vault', async (event, filename: string, content: string)
 
 ipcMain.handle('get-vault-files', async () => {
   try {
-    const files = await fs.promises.readdir(defaultVault);
     const validExts = ['.md', '.txt', '.pdf', '.png', '.jpg', '.jpeg'];
-    const valid = files.filter(f => validExts.includes(path.extname(f).toLowerCase()));
-    const stats = await Promise.all(valid.map(async (file) => {
-      const st = await fs.promises.stat(path.join(defaultVault, file));
-      return { name: file, size: st.size, mtime: st.mtimeMs };
-    }));
+    
+    async function getFilesRecursive(dir: string, baseDir: string): Promise<{ name: string, size: number, mtime: number }[]> {
+      const entries = await fs.promises.readdir(dir, { withFileTypes: true });
+      const files = await Promise.all(entries.map(async (entry) => {
+        const fullPath = path.join(dir, entry.name);
+        const relativePath = path.relative(baseDir, fullPath);
+        
+        if (entry.isDirectory()) {
+          return getFilesRecursive(fullPath, baseDir);
+        } else if (validExts.includes(path.extname(entry.name).toLowerCase())) {
+          const st = await fs.promises.stat(fullPath);
+          return [{ name: relativePath, size: st.size, mtime: st.mtimeMs }];
+        }
+        return [];
+      }));
+      return files.flat();
+    }
+
+    const stats = await getFilesRecursive(defaultVault, defaultVault);
     return stats.sort((a,b) => b.mtime - a.mtime);
   } catch (e) {
+    console.error('Error listing vault files:', e);
     return [];
   }
 });
@@ -154,6 +172,10 @@ ipcMain.handle('read-vault-file', async (event, filename: string) => {
       const buffer = await fs.promises.readFile(filePath);
       const mimeType = ext === '.png' ? 'image/png' : 'image/jpeg';
       return `data:${mimeType};base64,${buffer.toString('base64')}`;
+    }
+
+    if (ext === '.pdf') {
+      return `[PDF_FILE]:${filename}`;
     }
     
     return await fs.promises.readFile(filePath, 'utf-8');
@@ -190,12 +212,13 @@ ipcMain.handle('search-and-chat', async (event, history: {role: 'user' | 'assist
   try {
     // 1. Semantic Search using the latest query
     const userQuery = history.reverse().find(m => m.role === 'user')?.content || '';
-    const contextMeta = await searchContext(userQuery, 5, targetFile);
-    const contextContent = contextMeta.map(m => `[From ${path.basename(m.filePath)}]:\n${m.content}`);
+    const absoluteTargetFile = targetFile ? path.join(defaultVault, targetFile) : undefined;
+    const contextMeta = await searchContext(userQuery, 5, absoluteTargetFile);
+    const contextContent = contextMeta.map(m => `[From ${path.relative(defaultVault, m.filePath)}]:\n${m.content}`);
     
     // Send detailed citations to renderer before starting chat
     const citations = contextMeta.map(m => ({
-      filePath: m.filePath,
+      filePath: path.relative(defaultVault, m.filePath),
       content: m.content
     }));
     event.sender.send('chat-citations', citations);

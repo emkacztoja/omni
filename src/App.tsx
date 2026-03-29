@@ -16,7 +16,7 @@ interface Message {
 
 function CitationViewer({ citation, onClose }: { citation: Citation; onClose: () => void }) {
   const [fileContent, setFileContent] = useState<string | null>(null);
-  const fileName = citation.filePath.split(/[/\\]/).pop() || '';
+  const fileName = citation.filePath; // This is now a relative path from the backend
   const isImage = /\.(png|jpg|jpeg)$/i.test(fileName);
 
   useEffect(() => {
@@ -54,6 +54,27 @@ function CitationViewer({ citation, onClose }: { citation: Citation; onClose: ()
                    {citation.content}
                  </div>
                </div>
+            </div>
+          ) : fileName.toLowerCase().endsWith('.pdf') ? (
+            <div className="flex flex-col gap-6">
+                <div className="bg-primary/5 p-8 rounded-xl border border-primary/20 text-textMain relative overflow-hidden">
+                  <div className="absolute top-0 left-0 w-1 h-full bg-primary/40"></div>
+                  <div className="flex items-center gap-3 mb-6">
+                      <div className="w-10 h-10 rounded-lg bg-primary/20 flex items-center justify-center">
+                          <BrainCircuit className="w-6 h-6 text-primary" />
+                      </div>
+                      <div>
+                          <p className="text-[10px] uppercase tracking-[0.2em] text-primary font-black opacity-60">Retrieved PDF Fragment</p>
+                          <h4 className="text-white font-semibold">Semantic Context</h4>
+                      </div>
+                  </div>
+                  <div className="text-base text-white/90 leading-relaxed font-sans bg-background/40 p-5 rounded-lg border border-white/5 whitespace-pre-wrap">
+                    {citation.content}
+                  </div>
+                  <div className="mt-4 text-xs text-textMuted italic bg-white/5 p-3 rounded-md">
+                    Note: For full document access, use the "Open in System Editor" button below to launch your default PDF viewer.
+                  </div>
+                </div>
             </div>
           ) : (() => {
             const parts = fileContent.split(citation.content);
@@ -445,7 +466,7 @@ function App() {
            {Object.values(ingestingFiles).map(file => (
               <div key={file.filePath} className="w-full max-w-md mx-auto bg-surface/90 backdrop-blur border border-primary/20 rounded-lg p-3 shadow-xl animate-in slide-in-from-top-4 duration-300 pointer-events-auto">
                  <div className="flex justify-between items-center mb-2">
-                    <span className="text-[10px] font-bold text-white truncate max-w-[200px]">{file.filePath.split(/[/\\]/).pop()}</span>
+                    <span className="text-[10px] font-bold text-white truncate max-w-[200px]">{file.filePath}</span>
                     <span className="text-[10px] text-primary font-black uppercase tracking-widest">{file.status}</span>
                  </div>
                  <div className="h-1.5 w-full bg-white/5 rounded-full overflow-hidden">
@@ -528,7 +549,7 @@ function App() {
                                         className="text-xs px-2 py-1 rounded bg-surface border border-border text-primary hover:text-white transition-colors flex items-center gap-1.5"
                                       >
                                         <FileText className="w-3 h-3" />
-                                        {c.filePath.split(/[/\\]/).pop()}
+                                        {c.filePath}
                                       </button>
                                     ))}
                                   </div>

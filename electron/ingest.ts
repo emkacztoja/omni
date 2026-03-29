@@ -7,12 +7,11 @@ import { loadSettings } from './settings';
 export async function parsePDF(filePath: string): Promise<string> {
   const dataBuffer = fs.readFileSync(filePath);
   try {
-    // Convert Node.js Buffer to Uint8Array as required by newer pdf-parse versions
+    // Convert Node.js Buffer to Uint8Array as required by pdfjs/pdf-parse
     const uint8Array = new Uint8Array(dataBuffer);
-    const pdf = new PDFParse(uint8Array);
-    await pdf.load();
-    const text = await pdf.getText();
-    return text || '';
+    const pdf = new PDFParse({ data: uint8Array });
+    const textResult = await pdf.getText();
+    return textResult.text || '';
   } catch (err) {
     console.error(`Error parsing PDF ${filePath}:`, err);
     return '';

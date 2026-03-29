@@ -7,8 +7,10 @@ import { parsePDF, parseImage } from './ingest';
 import { sendIngestProgress } from './main';
 
 let currentWatcher: chokidar.FSWatcher | null = null;
+let watchRoot: string = '';
 
 export async function startWatching(dirPath: string) {
+  watchRoot = dirPath;
   if (currentWatcher) {
     await currentWatcher.close();
   }
@@ -62,27 +64,31 @@ async function processFile(filePath: string) {
         }
       }
     } else if (ext === '.pdf') {
-      sendIngestProgress(filePath, 20, 'Parsing PDF...');
+      const relPath = path.relative(watchRoot, filePath);
+      sendIngestProgress(relPath, 20, 'Parsing PDF...');
       text = await parsePDF(filePath);
     } else if (['.png', '.jpg', '.jpeg'].includes(ext)) {
-      sendIngestProgress(filePath, 0, 'Starting OCR...');
+      const relPath = path.relative(watchRoot, filePath);
+      sendIngestProgress(relPath, 0, 'Starting OCR...');
       text = await parseImage(filePath, (prog, status) => {
-        sendIngestProgress(filePath, prog, status);
+        sendIngestProgress(relPath, prog, status);
       });
     }
 
     if (text.trim().length > 0) {
       const isMarkdown = ext === '.md' || ext === '.txt';
+      const relPath = path.relative(watchRoot, filePath);
       const prefix = isMarkdown ? '' : `[File: ${path.basename(filePath)}]\n[Content follows]`;
-      sendIngestProgress(filePath, 90, 'Indexing...');
+      sendIngestProgress(relPath, 90, 'Indexing...');
       await upsertFileChunks(filePath, text, stat.mtimeMs, prefix);
-      sendIngestProgress(filePath, 100, 'Complete');
-      console.log(`[Omni] Ingested ${ext}: ${path.basename(filePath)}`);
+      sendIngestProgress(relPath, 100, 'Complete');
+      console.log(`[Omni] Ingested ${ext}: ${relPath}`);
       
-      setTimeout(() => sendIngestProgress(filePath, -1, ''), 3000);
+      setTimeout(() => sendIngestProgress(relPath, -1, ''), 3000);
     }
   } catch (err) {
+    const relPath = path.relative(watchRoot, filePath);
     console.error(`[Omni] Error processing file ${filePath}:`, err);
-    sendIngestProgress(filePath, -1, 'Error');
+    sendIngestProgress(relPath, -1, 'Error');
   }
 }
