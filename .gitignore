@@ -3,3 +3,4 @@ node_modules
 dist-electron
 GEMINI.md
 release
+eng.traineddata

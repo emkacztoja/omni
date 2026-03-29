@@ -11,7 +11,7 @@ export interface AppSettings {
 const defaultSettings: AppSettings = {
   chatModel: 'mistral:latest',
   embedModel: 'nomic-embed-text:latest',
-  systemPrompt: 'You are Omni, an intelligent local AI assistant. Answer the user clearly and concisely based primarily on any vault context provided.'
+  systemPrompt: 'You are Omni, a local AI assistant. You have access to a vault of notes, PDFs, and images. Use the provided context to answer questions accurately. Note that filenames (like "zaproszenie") may be in different languages. If the user asks in English about an "invite", look for relevant context even if the source is in another language. Always be concise and helpful.'
 };
 
 const settingsPath = path.join(app.getPath('userData'), 'omni_settings.json');

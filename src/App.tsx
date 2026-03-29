@@ -10,11 +10,188 @@ interface Message {
   id: string;
   role: 'user' | 'ai';
   content: string;
-  citations?: string[];
+  citations?: Citation[];
   streaming?: boolean;
 }
 
+function CitationViewer({ citation, onClose }: { citation: Citation; onClose: () => void }) {
+  const [fileContent, setFileContent] = useState<string | null>(null);
+  const fileName = citation.filePath.split(/[/\\]/).pop() || '';
+  const isImage = /\.(png|jpg|jpeg)$/i.test(fileName);
+
+  useEffect(() => {
+    window.electronAPI.readVaultFile(fileName).then(setFileContent);
+  }, [fileName]);
+
+  if (fileContent === null) return null;
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 animate-in fade-in duration-200">
+      <div className="bg-surface border border-border rounded-2xl w-full max-w-4xl max-h-[85vh] flex flex-col shadow-2xl overflow-hidden scale-in-center">
+        <div className="flex items-center justify-between p-4 border-b border-border bg-background/50">
+          <div className="flex items-center gap-2">
+            <FileText className="w-4 h-4 text-primary" />
+            <span className="font-semibold text-sm">{fileName}</span>
+          </div>
+          <button onClick={onClose} className="p-1 hover:bg-white/10 rounded-lg transition-colors">
+            <Trash2 className="w-4 h-4 text-textMuted" /> 
+          </button>
+        </div>
+        <div className="flex-1 overflow-y-auto p-6 font-mono text-sm leading-relaxed whitespace-pre-wrap select-text">
+          {isImage ? (
+            <div className="flex flex-col gap-6">
+               <div className="flex justify-center bg-background/30 p-4 rounded-xl border border-border">
+                 <img 
+                    src={fileContent} 
+                    alt={fileName} 
+                    className="max-w-full h-auto rounded-lg shadow-xl border border-border max-h-[50vh]" 
+                 />
+               </div>
+               <div className="bg-primary/5 p-5 rounded-xl border border-primary/20 text-textMain relative overflow-hidden">
+                 <div className="absolute top-0 left-0 w-1 h-full bg-primary/40"></div>
+                 <p className="text-[10px] uppercase tracking-[0.2em] text-primary font-black mb-3 opacity-60">Extracted Context (OCR)</p>
+                 <div className="text-sm font-sans leading-relaxed">
+                   {citation.content}
+                 </div>
+               </div>
+            </div>
+          ) : (() => {
+            const parts = fileContent.split(citation.content);
+            if (parts.length > 1) {
+              return (
+                <>
+                  {parts[0]}
+                  <span className="bg-primary/30 text-white ring-2 ring-primary/50 rounded-sm px-0.5 animate-pulse">
+                    {citation.content}
+                  </span>
+                  {parts.slice(1).join(citation.content)}
+                </>
+              );
+            }
+            return fileContent;
+          })()}
+        </div>
+        <div className="p-4 border-t border-border bg-background/30 flex justify-end">
+          <button 
+            onClick={() => window.electronAPI.openVaultFile(fileName)}
+            className="flex items-center gap-2 px-4 py-2 bg-white/5 hover:bg-white/10 rounded-lg text-sm transition-all border border-border"
+          >
+            <ExternalLink className="w-4 h-4" />
+            Open in System Editor
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function QuickSearch() {
+  const [query, setQuery] = useState('');
+  const [results, setResults] = useState<Message[]>([]);
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    inputRef.current?.focus();
+  }, []);
+
+  useEffect(() => {
+    // Dynamically resize based on content
+    const height = results.length > 0 ? 500 : 80;
+    window.electronAPI.resizeSearchWindow(height);
+  }, [results]);
+
+  const handleSearch = async () => {
+    if (!query.trim()) return;
+    setResults([]);
+    
+    // For quick search, we just do a direct semantic search and synthesis
+    const msg: Message = { id: Date.now().toString(), role: 'ai', content: '', streaming: true };
+    setResults([msg]);
+
+    try {
+      await window.electronAPI.searchAndChat([{ role: 'user', content: query }]);
+    } catch (e) {
+      console.error(e);
+    }
+  };
+
+  useEffect(() => {
+    window.electronAPI.onChatChunk((chunk: string) => {
+      setResults(prev => {
+        const last = [...prev];
+        if (last.length > 0) {
+          last[0] = { ...last[0], content: last[0].content + chunk };
+        }
+        return last;
+      });
+    });
+
+    window.electronAPI.onChatComplete(() => {
+      // Logic for results could go here
+    });
+
+    return () => window.electronAPI.removeChatListeners();
+  }, []);
+
+  return (
+    <div className="w-full h-full flex flex-col bg-[#121212]/90 backdrop-blur-xl border border-white/10 rounded-2xl shadow-2xl overflow-hidden ring-1 ring-white/20">
+      <div className="flex items-center px-6 py-4 border-b border-white/5">
+        <BrainCircuit className="w-6 h-6 text-primary mr-4 animate-pulse" />
+        <input 
+          ref={inputRef}
+          type="text" 
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          onKeyDown={(e) => { if(e.key === 'Enter') handleSearch() }}
+          placeholder="Global Omni Search..." 
+          className="bg-transparent border-none outline-none w-full text-xl text-white placeholder:text-white/20 font-light"
+        />
+      </div>
+      
+      {results.length > 0 && (
+        <div className="p-6 overflow-y-auto max-h-[400px] prose prose-invert prose-sm">
+          {results[0].content === '' ? (
+            <div className="flex items-center gap-3 text-white/40 italic">
+              <div className="w-2 h-2 bg-primary rounded-full animate-ping"></div>
+              Omni is thinking...
+            </div>
+          ) : (
+            <ReactMarkdown remarkPlugins={[remarkGfm]}>{results[0].content}</ReactMarkdown>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+interface IngestProgress {
+  filePath: string;
+  progress: number;
+  status: string;
+}
+
 function App() {
+  const isSearchMode = new URLSearchParams(window.location.search).get('search') === 'true';
+  const [ingestingFiles, setIngestingFiles] = useState<Record<string, IngestProgress>>({});
+
+  useEffect(() => {
+    window.electronAPI.onIngestProgress((data) => {
+      setIngestingFiles(prev => {
+        const next = { ...prev };
+        if (data.progress === -1) {
+          delete next[data.filePath];
+        } else {
+          next[data.filePath] = data;
+        }
+        return next;
+      });
+    });
+  }, []);
+
+  if (isSearchMode) {
+    return <QuickSearch />;
+  }
+
   const [pingStatus, setPingStatus] = useState<string>('Pinging main process...');
   const [activeTab, setActiveTab] = useState<Tab>('search');
   const [query, setQuery] = useState('');
@@ -22,6 +199,7 @@ function App() {
   
   const [messages, setMessages] = useState<Message[]>([]);
   const [isGenerating, setIsGenerating] = useState(false);
+  const [selectedCitation, setSelectedCitation] = useState<Citation | null>(null);
   
   const [noteContent, setNoteContent] = useState('');
   const [isDragging, setIsDragging] = useState(false);
@@ -50,6 +228,23 @@ function App() {
     }
   }, [activeTab]);
   
+  useEffect(() => {
+    window.electronAPI.getChatHistory().then(setMessages);
+  }, []);
+
+  useEffect(() => {
+    if (messages.length > 0) {
+      window.electronAPI.saveChatHistory(messages);
+    }
+  }, [messages]);
+
+  const clearChat = async () => {
+    if (confirm('Are you sure you want to clear your chat history?')) {
+      setMessages([]);
+      await window.electronAPI.saveChatHistory([]);
+    }
+  };
+
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   const scrollToBottom = () => {
@@ -71,7 +266,7 @@ function App() {
     };
     testIPC();
 
-    window.electronAPI.onChatCitations((citations: string[]) => {
+    window.electronAPI.onChatCitations((citations) => {
       setMessages(prev => {
         const last = [...prev];
         if (last.length > 0 && last[last.length - 1].role === 'ai') {
@@ -117,10 +312,6 @@ function App() {
       window.electronAPI.removeChatListeners();
     };
   }, []);
-
-  const openFile = (filePath: string) => {
-    alert(`File reference located at:\n${filePath}`);
-  };
 
   const handleQuickAction = (actionText: string) => {
     submitChat(actionText);
@@ -222,21 +413,26 @@ function App() {
           </button>
           <button 
             onClick={() => setActiveTab('graph')}
-            className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all font-medium border
-              ${activeTab === 'graph' ? 'bg-primary/10 text-primary border-primary/20 bg-gradient-to-r from-primary/10 to-transparent' : 'text-textMuted border-transparent hover:bg-surface hover:text-white'}`}
+            className={`w-full flex items-center gap-3 px-3 py-2 text-sm font-medium rounded-md transition-colors ${activeTab === 'graph' ? 'bg-white/5 text-white' : 'text-textMuted hover:text-white hover:bg-white/5'}`}
           >
-            <Network className="w-5 h-5" />
+            <Network className="w-4 h-4" />
             Knowledge Graph
           </button>
         </nav>
 
-        <div className="p-6">
+        <div className="p-4 space-y-2">
+          <button 
+            onClick={clearChat}
+            className="w-full flex items-center gap-3 px-3 py-2 text-xs font-medium rounded-md transition-colors text-red-400 hover:bg-red-400/10 border border-transparent hover:border-red-400/20"
+          >
+            <Trash2 className="w-3.5 h-3.5" />
+            Clear Chat History
+          </button>
           <button 
             onClick={() => setActiveTab('settings')}
-            className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all font-medium border
-              ${activeTab === 'settings' ? 'bg-primary/10 text-primary border-primary/20 bg-gradient-to-r from-primary/10 to-transparent' : 'text-textMuted border-transparent hover:bg-surface hover:text-white'}`}
+            className={`w-full flex items-center gap-3 px-3 py-2 text-sm font-medium rounded-md transition-colors ${activeTab === 'settings' ? 'bg-white/5 text-white' : 'text-textMuted hover:text-white hover:bg-white/5'}`}
           >
-            <Settings className="w-5 h-5" />
+            <Settings className="w-4 h-4" />
             Settings
           </button>
         </div>
@@ -244,6 +440,24 @@ function App() {
 
       {/* Main Content Area */}
       <main className="flex-1 flex flex-col relative w-full overflow-hidden">
+        {/* Ingestion Progress Bars */}
+        <div className="absolute top-14 left-0 right-0 z-[60] px-8 flex flex-col gap-2 pointer-events-none">
+           {Object.values(ingestingFiles).map(file => (
+              <div key={file.filePath} className="w-full max-w-md mx-auto bg-surface/90 backdrop-blur border border-primary/20 rounded-lg p-3 shadow-xl animate-in slide-in-from-top-4 duration-300 pointer-events-auto">
+                 <div className="flex justify-between items-center mb-2">
+                    <span className="text-[10px] font-bold text-white truncate max-w-[200px]">{file.filePath.split(/[/\\]/).pop()}</span>
+                    <span className="text-[10px] text-primary font-black uppercase tracking-widest">{file.status}</span>
+                 </div>
+                 <div className="h-1.5 w-full bg-white/5 rounded-full overflow-hidden">
+                    <div 
+                      className="h-full bg-primary transition-all duration-500 ease-out shadow-[0_0_10px_rgba(99,102,241,0.5)]" 
+                      style={{ width: `${file.progress}%` }}
+                    />
+                 </div>
+              </div>
+           ))}
+        </div>
+
         <header className="h-14 border-b border-border/50 flex items-center px-6 shrink-0 bg-background/80 backdrop-blur z-10">
           <div className="flex-1 font-semibold text-sm">
             {activeTab === 'search' && 'Search & Chat'}
@@ -271,7 +485,7 @@ function App() {
               {messages.length === 0 ? (
                 <div className="max-w-3xl flex-1 mx-auto flex flex-col justify-center text-center space-y-6">
                   <h2 className="text-4xl font-light text-white/90">How can I help you today?</h2>
-                  
+
                   <div className="flex gap-4 justify-center mt-8 text-sm">
                     <button 
                       onClick={() => handleQuickAction("Summarize latest notes")}
@@ -301,7 +515,7 @@ function App() {
                               ) : (
                                 <ReactMarkdown remarkPlugins={[remarkGfm]}>{msg.content}</ReactMarkdown>
                               )}
-                              
+
                               {/* Citations block */}
                               {msg.citations && msg.citations.length > 0 && (
                                 <div className="mt-4 pt-4 border-t border-border/50">
@@ -310,10 +524,11 @@ function App() {
                                     {msg.citations.map((c, i) => (
                                       <button 
                                         key={i} 
-                                        onClick={() => openFile(c)}
-                                        className="text-xs px-2 py-1 rounded bg-surface border border-border text-primary hover:text-white transition-colors"
+                                        onClick={() => setSelectedCitation(c)}
+                                        className="text-xs px-2 py-1 rounded bg-surface border border-border text-primary hover:text-white transition-colors flex items-center gap-1.5"
                                       >
-                                        {c.split(/[/\\]/).pop()}
+                                        <FileText className="w-3 h-3" />
+                                        {c.filePath.split(/[/\\]/).pop()}
                                       </button>
                                     ))}
                                   </div>
@@ -328,37 +543,18 @@ function App() {
                 </div>
               )}
 
-              {/* Chat Input Floating */}
-              <div className="absolute bottom-8 left-8 right-8">
-                <div className="max-w-4xl mx-auto relative group">
-                  <div className="absolute inset-0 bg-primary/20 blur-lg rounded-full opacity-0 group-hover:opacity-100 transition-opacity duration-700 pointer-events-none"></div>
-                  <div className="relative flex items-center bg-surface/90 border border-border rounded-xl px-4 py-3 shadow-2xl backdrop-blur focus-within:ring-1 focus-within:ring-primary focus-within:border-primary transition-all">
-                    <Search className="w-5 h-5 text-textMuted mr-3 shrink-0" />
-                    <input 
-                      type="text" 
-                      value={query}
-                      onChange={(e) => setQuery(e.target.value)}
-                      onKeyDown={(e) => { if(e.key === 'Enter') submitChat(query) }}
-                      disabled={isGenerating}
-                      placeholder="Ask Omni..." 
-                      className="bg-transparent border-none outline-none w-full text-textMain placeholder:text-textMuted disabled:opacity-50"
-                    />
-                    <button 
-                      onClick={() => submitChat(query)}
-                      disabled={!query.trim() || isGenerating}
-                      className="ml-2 p-2 rounded-lg text-textMuted hover:text-primary hover:bg-white/5 disabled:opacity-30 transition-colors"
-                    >
-                      <Send className="w-4 h-4" />
-                    </button>
-                  </div>
-                </div>
-              </div>
+              {selectedCitation && (
+                <CitationViewer 
+                  citation={selectedCitation} 
+                  onClose={() => setSelectedCitation(null)} 
+                />
+              )}
             </>
           )}
 
           {activeTab === 'vault' && (
             <div className="max-w-5xl mx-auto mt-8 w-full grid grid-cols-1 md:grid-cols-2 gap-8 object-cover">
-              
+
               <div className="space-y-6">
                 <div 
                   className={`w-full p-8 rounded-2xl border-2 border-dashed transition-all flex flex-col items-center justify-center text-center 
@@ -369,7 +565,7 @@ function App() {
                 >
                   <FileText className="w-10 h-10 mb-4 text-textMuted" />
                   <h3 className="text-lg font-medium text-white mb-2">Drag & Drop Files</h3>
-                  <p className="text-textMuted text-sm">Drop .md or .txt files to ingest.</p>
+                  <p className="text-textMuted text-sm">Drop .md, .txt, .pdf or images to ingest.</p>
                 </div>
 
                 <div className="flex flex-col gap-3">
@@ -399,7 +595,7 @@ function App() {
                   Indexed Files
                   <span className="text-sm bg-primary/20 text-primary px-3 py-1 rounded-full">{vaultFiles.length} files</span>
                 </h3>
-                
+
                 <div className="flex-1 overflow-y-auto space-y-2 pr-2">
                   {vaultFiles.length === 0 ? (
                     <p className="text-sm text-textMuted text-center mt-10">Your vault is empty.</p>
@@ -443,7 +639,7 @@ function App() {
           {activeTab === 'settings' && settings && (
             <div className="max-w-2xl mx-auto mt-8 w-full bg-surface border border-border rounded-2xl p-8 shadow-xl">
               <h2 className="text-2xl font-bold mb-6 text-white text-center">Engine Parameters</h2>
-              
+
               <div className="space-y-6">
                 <div>
                   <label className="block text-sm font-medium text-textMuted mb-2">Generation Model (LLM)</label>
@@ -458,7 +654,7 @@ function App() {
                     ))}
                   </select>
                 </div>
-                
+
                 <div>
                   <label className="block text-sm font-medium text-textMuted mb-2">Embedding Model (Vector Space)</label>
                   <select 
@@ -510,8 +706,36 @@ function App() {
               </div>
             </div>
           )}
-
         </div>
+
+        {/* Chat Input Floating - MOVED OUTSIDE scrolling div */}
+        {(activeTab === 'search' || activeTab === 'chat') && (
+          <div className="absolute bottom-8 left-8 right-8 z-20">
+            <div className="max-w-4xl mx-auto relative group">
+              <div className="absolute inset-0 bg-primary/20 blur-lg rounded-full opacity-0 group-hover:opacity-100 transition-opacity duration-700 pointer-events-none"></div>
+              <div className="relative flex items-center bg-surface/90 border border-border rounded-xl px-4 py-3 shadow-2xl backdrop-blur focus-within:ring-1 focus-within:ring-primary focus-within:border-primary transition-all">
+                <Search className="w-5 h-5 text-textMuted mr-3 shrink-0" />
+                <input 
+                  type="text" 
+                  value={query}
+                  onChange={(e) => setQuery(e.target.value)}
+                  onKeyDown={(e) => { if(e.key === 'Enter') submitChat(query) }}
+                  disabled={isGenerating}
+                  placeholder="Ask Omni..." 
+                  className="bg-transparent border-none outline-none w-full text-textMain placeholder:text-textMuted disabled:opacity-50"
+                />
+                <button 
+                  onClick={() => submitChat(query)}
+                  disabled={!query.trim() || isGenerating}
+                  className="ml-2 p-2 rounded-lg text-textMuted hover:text-primary hover:bg-white/5 disabled:opacity-30 transition-colors"
+                >
+                  <Send className="w-4 h-4" />
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
       </main>
     </div>
   );
